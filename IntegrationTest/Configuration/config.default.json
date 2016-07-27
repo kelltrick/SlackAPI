@@ -4,8 +4,8 @@
     "botAuthToken": "bottoken-bottoken-bottoken-bottoken",
     "testChannel": "SuperSecretChannel",
     "directMessageUser":  "someUserId",
-	"authCode": "some-super-secret-code-from-Slack-specially-created-for-you-=)",
-	"clientId": "your-special-id",
-	"clientSecret": "such-special-secret-key"
+    "authCode": "some-super-secret-code-from-Slack-specially-created-for-you-=)",
+    "clientId": "your-special-id",
+    "clientSecret": "such-special-secret-key"
   }
 }

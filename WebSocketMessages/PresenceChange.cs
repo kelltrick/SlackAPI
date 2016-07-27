@@ -2,9 +2,11 @@
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("presence_change")]
     public class PresenceChange : SlackSocketMessage
     {
+        [SlackSocketRouting("presence_change")]
+        public PresenceChange()
+        { }
         public string user;
         public Presence presence;
     }

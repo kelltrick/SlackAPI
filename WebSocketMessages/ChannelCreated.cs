@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("channel_created")]
     public class ChannelCreated
     {
+        [SlackSocketRouting("channel_created")]
+        public ChannelCreated()
+        { }
         public Channel channel;
     }
 }

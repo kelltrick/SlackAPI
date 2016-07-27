@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("user_change")]
     public class UserChange : SlackSocketMessage
     {
+        [SlackSocketRouting("user_change")]
+        public UserChange()
+        { }
         public User user;
     }
 }

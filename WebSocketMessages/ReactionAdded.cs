@@ -7,9 +7,11 @@ using System.Threading.Tasks;
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("reaction_added")]
     public class ReactionAdded : SlackSocketMessage
     {
+        [SlackSocketRouting("reaction_added")]
+        public ReactionAdded()
+        { }
         public string user;
         public string reaction;
         public string item_user;

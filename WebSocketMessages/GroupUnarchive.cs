@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("group_unarchive")]
     public class GroupUnarchive : SlackSocketMessage
     {
+        [SlackSocketRouting("group_unarchive")]
+        public GroupUnarchive()
+        { }
         public string channel;
     }
 }

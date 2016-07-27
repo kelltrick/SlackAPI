@@ -3,30 +3,75 @@ using Newtonsoft.Json;
 using SlackAPI.Utilities;
 using System;
 using System.Collections.Generic;
-using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using SlackAPI.WebSocketMessages;
+
+#if WINDOWS_UWP
+using Windows.Networking.Sockets;
+using Windows.System.Threading;
+using Windows.Storage.Streams;
+#else
+using System.Net.WebSockets;
+#endif
 
 namespace SlackAPI
 {
+    public static class SocketExtensions
+    {
+#if WINDOWS_UWP
+        public static WebSocketState State(this MessageWebSocket socket)
+        {
+            return WebSocketState.None;
+        }
+#else
+        public static WebSocketState State(this ClientWebSocket socket)
+        {
+            return socket.State;
+        }
+#endif
+    }
+
+#if WINDOWS_UWP
+    public enum WebSocketState
+    {
+        None = 0,
+        Connecting = 1,
+        Open = 2,
+        CloseSent = 3,
+        CloseReceived = 4,
+        Closed = 5,
+        Aborted = 6
+    }
+#endif
+
     public class SlackSocket
     {
         LockFreeQueue<string> sendingQueue;
         int currentlySending;
         int closedEmitted;
-        CancellationTokenSource cts;
 
         Dictionary<int, Action<string>> callbacks;
+#if WINDOWS_UWP
+        internal WebSocketState socketState;
+        internal MessageWebSocket socket;
+
+        public event Action<Exception> ErrorSending;
+        public event Action<Exception> ErrorReceiving;
+#else
+        CancellationTokenSource cts;
         internal ClientWebSocket socket;
+        
+        public event Action<WebSocketException> ErrorSending;
+        public event Action<WebSocketException> ErrorReceiving;
+#endif
         int currentId;
 
         Dictionary<string, Dictionary<string, Delegate>> routes;
-        public bool Connected { get { return socket != null && socket.State == WebSocketState.Open; } }
-        public event Action<WebSocketException> ErrorSending;
-        public event Action<WebSocketException> ErrorReceiving;
+        public bool Connected { get { return socket != null && socket.State() == WebSocketState.Open; } }
         public event Action<Exception> ErrorReceivingDesiralization;
         public event Action<Exception> ErrorHandlingMessage;
         public event Action ConnectionClosed;
@@ -37,11 +82,30 @@ namespace SlackAPI
         static SlackSocket()
         {
             routing = new Dictionary<string, Dictionary<string, Type>>();
+
+#if WINDOWS_UWP
+            Assembly currentAssembly = typeof(SlackClient).GetTypeInfo().Assembly;
+            foreach (Type t in typeof(SlackClient).GetTypeInfo().Assembly.GetTypes())
+                foreach (SlackSocketRouting route in t.GetConstructor(new Type[0]).GetCustomAttributes<SlackSocketRouting>())
+                {
+                    if (!routing.ContainsKey(route.Type))
+                        routing.Add(route.Type, new Dictionary<string, Type>()
+                            {
+                                {route.SubType ?? "null", t}
+                            });
+                    else
+                        if (!routing[route.Type].ContainsKey(route.SubType ?? "null"))
+                        routing[route.Type].Add(route.SubType ?? "null", t);
+                    else
+                        throw new InvalidProgramException("Cannot have two socket message types with the same type and subtype!");
+                }
+
+#else
             foreach (Assembly assy in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (!assy.GlobalAssemblyCache)
                     foreach (Type t in assy.GetTypes())
-                        foreach (SlackSocketRouting route in t.GetCustomAttributes<SlackSocketRouting>())
+                        foreach (SlackSocketRouting route in t.GetConstructor(new Type[0]).GetCustomAttributes<SlackSocketRouting>())
                         {
                             if (!routing.ContainsKey(route.Type))
                                 routing.Add(route.Type, new Dictionary<string, Type>()
@@ -55,21 +119,38 @@ namespace SlackAPI
                                     throw new InvalidProgramException("Cannot have two socket message types with the same type and subtype!");
                         }
             }
+#endif
         }
 
-		public SlackSocket(LoginResponse loginDetails, object routingTo, Action onConnected = null)
+        public SlackSocket(LoginResponse loginDetails, object routingTo, Action onConnected = null)
         {
             BuildRoutes(routingTo);
+#if WINDOWS_UWP
+            socket = new MessageWebSocket();
+            socket.Control.MessageType = SocketMessageType.Utf8;
+            socket.MessageReceived += MessageReceived;
+            socket.Closed += Closed;
+            socketState = WebSocketState.None;
+#else
             socket = new ClientWebSocket();
+#endif
+
             callbacks = new Dictionary<int, Action<string>>();
             sendingQueue = new LockFreeQueue<string>();
             currentId = 1;
 
+            Uri slackApiUri = new Uri(string.Format("{0}?svn_rev={1}&login_with_boot_data-0-{2}&on_login-0-{2}&connect-1-{2}", loginDetails.url, loginDetails.svn_rev, DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds));
+#if WINDOWS_UWP
+            socketState = WebSocketState.Connecting;
+            socket.ConnectAsync(slackApiUri).GetResults();
+            socketState = WebSocketState.Open;
+#else
             cts = new CancellationTokenSource();
-            socket.ConnectAsync(new Uri(string.Format("{0}?svn_rev={1}&login_with_boot_data-0-{2}&on_login-0-{2}&connect-1-{2}", loginDetails.url, loginDetails.svn_rev, DateTime.Now.Subtract(new DateTime(1970, 1, 1)).TotalSeconds)), cts.Token).Wait();
-            if(onConnected != null)
-                onConnected();
+            socket.ConnectAsync(slackApiUri, cts.Token).Wait();
             SetupReceiving();
+#endif
+            if (onConnected != null)
+                onConnected();
         }
 
         void BuildRoutes(object routingTo)
@@ -124,7 +205,7 @@ namespace SlackAPI
                 message.id = Interlocked.Increment(ref currentId);
             //socket.Send(JsonConvert.SerializeObject(message));
 
-			if (string.IsNullOrEmpty(message.type)){
+            if (string.IsNullOrEmpty(message.type)){
                 IEnumerable<SlackSocketRouting> routes = message.GetType().GetCustomAttributes<SlackSocketRouting>();
 
                 SlackSocketRouting route = null;
@@ -140,9 +221,13 @@ namespace SlackAPI
                 }
             }
 
-			sendingQueue.Push(JsonConvert.SerializeObject(message, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+            sendingQueue.Push(JsonConvert.SerializeObject(message, Formatting.None, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
             if (Interlocked.CompareExchange(ref currentlySending, 1, 0) == 0)
+#if WINDOWS_UWP
+                ThreadPool.RunAsync(HandleSending).GetResults();
+#else
                 ThreadPool.QueueUserWorkItem(HandleSending);
+#endif
         }
 
         public void BindCallback<K>(Action<K> callback)
@@ -174,6 +259,29 @@ namespace SlackAPI
             }
         }
 
+#if WINDOWS_UWP
+        //The MessageReceived event handler.
+        private void MessageReceived(MessageWebSocket sender, MessageWebSocketMessageReceivedEventArgs args)
+        {
+            DataReader messageReader = args.GetDataReader();
+            messageReader.UnicodeEncoding = Windows.Storage.Streams.UnicodeEncoding.Utf8;
+            string messageString = messageReader.ReadString(messageReader.UnconsumedBufferLength);
+
+            //Add code here to do something with the string that is received.
+        }
+
+        private async Task SendMessage(MessageWebSocket webSock, string message)
+        {
+            DataWriter messageWriter = new DataWriter(webSock.OutputStream);
+            messageWriter.WriteString(message);
+            await messageWriter.StoreAsync();
+        }
+
+        private void Closed(IWebSocket sender, WebSocketClosedEventArgs args)
+        {
+            //Add code here to do something when the connection is closed locally or by the server
+        }
+#else
         void SetupReceiving()
         {
             Task.Factory.StartNew(
@@ -183,7 +291,7 @@ namespace SlackAPI
                     byte[] bytes = new byte[1024];
                     buffers.Add(bytes);
                     ArraySegment<byte> buffer = new ArraySegment<byte>(bytes);
-                    while (socket.State == WebSocketState.Open)
+                    while (socket.State() == WebSocketState.Open)
                     {
                         WebSocketReceiveResult result = null;
                         try
@@ -233,6 +341,7 @@ namespace SlackAPI
                     }
                 }, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
+#endif
 
         void HandleMessage(SlackSocketMessage message, string data)
         {
@@ -272,14 +381,22 @@ namespace SlackAPI
         void HandleSending(object stateful)
         {
             string message;
-            while (sendingQueue.Pop(out message) && socket.State == WebSocketState.Open && !cts.Token.IsCancellationRequested)
+            while (sendingQueue.Pop(out message) && socket.State() == WebSocketState.Open
+#if !WINDOWS_UWP
+                && !cts.Token.IsCancellationRequested
+#endif
+                )
             {
                 byte[] sending = Encoding.UTF8.GetBytes(message);
                 ArraySegment<byte> buffer = new ArraySegment<byte>(sending);
                 try
                 {
+#if WINDOWS_UWP
+#else
                     socket.SendAsync(buffer, WebSocketMessageType.Text, true, cts.Token).Wait();
+#endif
                 }
+#if !WINDOWS_UWP
                 catch (WebSocketException wex)
                 {
                     if (ErrorSending != null)
@@ -287,16 +404,29 @@ namespace SlackAPI
                     Close();
                     break;
                 }
+#else
+                catch (Exception ex)
+                {
+                    if (ErrorSending != null)
+                        ErrorSending(ex);
+                    Close();
+                    break;
+                }
+#endif
             }
 
             currentlySending = 0;
         }
 
-		public void Close()
-		{
+        public void Close()
+        {
             try
             {
-                this.socket.Abort();
+#if WINDOWS_UWP
+                this.socket.Close(204, string.Empty);
+#else
+                this.socket.close();
+#endif
             }
             catch (Exception ex)
             {
@@ -305,7 +435,20 @@ namespace SlackAPI
 
             if (Interlocked.CompareExchange(ref closedEmitted, 1, 0) == 0 && ConnectionClosed != null)
                 ConnectionClosed();
-		}
+        }
+
+
+#if WINDOWS_UWP
+        public WebSocketState State()
+        {
+            return socketState;
+        }
+#else
+        public WebSocketState State()
+        {
+            return socket.State;
+        }
+#endif
     }
 
     public class SlackSocketMessage
@@ -316,6 +459,16 @@ namespace SlackAPI
         public string subtype;
         public bool ok = true;
         public Error error;
+        public static readonly Type[] ChildClasses = new Type[]
+        {
+            typeof(ChannelMarked),
+            typeof(DeletedMessage),
+            typeof(GroupArchive),
+            typeof(GroupClose),
+            typeof(GroupJoined),
+            typeof(ChannelMarked),
+            typeof(ChannelMarked),
+        };
     }
 
     public class Error
@@ -323,8 +476,8 @@ namespace SlackAPI
         public int code;
         public string msg;
     }
-
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = false)]
+    
+    [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = true, Inherited = false)]
     public class SlackSocketRouting : Attribute
     {
         public string Type;

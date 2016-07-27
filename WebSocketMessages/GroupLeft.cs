@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("group_left")]
     public class GroupLeft : SlackSocketMessage
     {
+        [SlackSocketRouting("group_left")]
+        public GroupLeft()
+        { }
         public Channel channel;
     }
 }

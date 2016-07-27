@@ -2,8 +2,6 @@
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("message")]
-    [SlackSocketRouting("message", "bot_message")]
     public class NewMessage : SlackSocketMessage
     {
         public string user;
@@ -12,6 +10,8 @@ namespace SlackAPI.WebSocketMessages
         public string team;
         public DateTime ts;
 
+        [SlackSocketRouting("message")]
+        [SlackSocketRouting("message", "bot_message")]
         public NewMessage()
         {
             type = "message";

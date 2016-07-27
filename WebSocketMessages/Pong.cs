@@ -2,9 +2,11 @@
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("pong")]
     public class Pong : SlackSocketMessage
     {
+        [SlackSocketRouting("pong")]
+        public Pong()
+        { }
         public int ping_interv_ms;
     }
 }

@@ -2,9 +2,11 @@
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("channel_marked")]
     public class ChannelMarked : SlackSocketMessage
     {
+        [SlackSocketRouting("channel_marked")]
+        public ChannelMarked()
+        { }
         public string channel;
         public DateTime ts;
     }

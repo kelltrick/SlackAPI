@@ -2,9 +2,11 @@
 
 namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("message", "message_deleted")]
     public class DeletedMessage : SlackSocketMessage
     {
+        [SlackSocketRouting("message", "message_deleted")]
+        public DeletedMessage()
+        { }
         public string channel;
         public DateTime ts;
         public DateTime deleted_ts;

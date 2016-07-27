@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("group_open")]
     public class GroupOpen : SlackSocketMessage
     {
+        [SlackSocketRouting("group_open")]
+        public GroupOpen()
+        { }
         public string user;
         public string channel;
     }

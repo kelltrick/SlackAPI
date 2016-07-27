@@ -1,8 +1,10 @@
 ﻿namespace SlackAPI.WebSocketMessages
 {
-    [SlackSocketRouting("group_archive")]
     public class GroupArchive : SlackSocketMessage
     {
+        [SlackSocketRouting("group_archive")]
+        public GroupArchive()
+        { }
         public string channel;
     }
 }
